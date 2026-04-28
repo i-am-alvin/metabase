@@ -23,7 +23,7 @@
    [metabase.metabot.tools.entity-details :as entity-details]
    [metabase.metabot.tools.field-stats :as field-stats]
    [metabase.metabot.tools.shared.instructions :as instructions]
-   [metabase.metabot.tools.shared.llm-shape :as llm-rep]
+   [metabase.metabot.tools.shared.llm-shape :as llm-shape]
    [metabase.transforms.core :as transforms]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]))
@@ -230,18 +230,18 @@
 
 (defn- format-content
   "Format a tool result as an LLM-ready string.
-   Dispatches to the right llm-rep formatter based on :result-type.
+   Dispatches to the right llm-shape formatter based on :result-type.
    Returns the :output string directly for error results (404s etc.)."
   [content]
   (if-let [structured (:structured-output content)]
     (case (:result-type structured)
       ;; NOTE: keep in sync with agent/tools/metadata.clj/format-field-metadata-output
       :field-metadata (format-with-instructions
-                       (llm-rep/field-metadata->xml structured)
+                       (llm-shape/field-metadata->xml structured)
                        instructions/field-metadata-instructions)
-      :entity         (llm-rep/entity->xml structured)
+      :entity         (llm-shape/entity->xml structured)
       ;; fallback — should not happen, but better than EDN
-      (llm-rep/entity->xml structured))
+      (llm-shape/entity->xml structured))
     ;; error case — :output is already a string
     (:formatted content)))
 
