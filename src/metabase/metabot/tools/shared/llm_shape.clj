@@ -1,5 +1,14 @@
-(ns metabase.metabot.tools.shared.llm-representations
-  "LLM representation utilities for formatting entities as XML.
+(ns metabase.metabot.tools.shared.llm-shape
+  "Output-side XML formatters that turn Metabase entity data (tables, fields, metrics,
+   queries, search results, ...) into the LLM-facing XML shape consumed by the metabot
+   agent. Templated via `resources/metabot/prompts/llm_shape.selmer`.
+
+   Naming note: this is the *output* (response-side) shape, not to be confused with the
+   *input*-side representations YAML format owned by `metabase.agent-lib.representations.*`.
+   The two share no schema and no code path; they were briefly named symmetrically
+   (`llm-representations` here, `representations` there) and the symmetry caused enough
+   confusion to motivate this rename.
+
    Matches Python AI Service patterns exactly for consistency."
   (:require
    [clojure.string :as str]
@@ -12,7 +21,7 @@
 
 (set! *warn-on-reflection* true)
 
-(def ^:private llm-template-name "llm_representations.selmer")
+(def ^:private llm-template-name "llm_shape.selmer")
 
 (defn- escape-xml
   "Escape XML special characters in a string.
@@ -67,7 +76,7 @@
 (defn- render-llm-template
   "Render a Selmer template with the supplied context."
   [type context]
-  (let [template (prompts/get-cached-llm-representations-template)
+  (let [template (prompts/get-cached-llm-shape-template)
         payload (merge (type-flags type) context)]
     (if template
       (try

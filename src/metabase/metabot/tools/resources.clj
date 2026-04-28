@@ -23,7 +23,7 @@
    [metabase.metabot.tools.entity-details :as entity-details]
    [metabase.metabot.tools.field-stats :as field-stats]
    [metabase.metabot.tools.shared.instructions :as instructions]
-   [metabase.metabot.tools.shared.llm-representations :as llm-rep]
+   [metabase.metabot.tools.shared.llm-shape :as llm-rep]
    [metabase.transforms.core :as transforms]
    [metabase.util.log :as log]
    [metabase.util.malli :as mu]))
