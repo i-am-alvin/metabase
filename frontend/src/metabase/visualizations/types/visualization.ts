@@ -360,7 +360,6 @@ export type VisualizationSettingDefinition<
     extra?: SettingsExtra,
   ) => CSSProperties | undefined;
   autoOpenWhenUnset?: boolean;
-  value?: TValue;
   set?: boolean;
   persistDefault?: boolean;
   inline?: boolean;
@@ -397,6 +396,7 @@ export type CompleteVisualizationSettingDefinition<
   props: Partial<TProps>;
   hidden: boolean;
   section?: string;
+  value?: TValue;
 };
 
 export type DatasetColumnSettingDefinition<
