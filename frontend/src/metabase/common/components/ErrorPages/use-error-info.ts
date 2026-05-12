@@ -1,7 +1,7 @@
 import { useAsync } from "react-use";
 import { t } from "ttag";
 
-import { useSelector } from "metabase/redux";
+import { useDispatch, useSelector } from "metabase/redux";
 import { getUser, getUserIsAdmin } from "metabase/selectors/user";
 import { MetabaseApi, UtilApi } from "metabase/services";
 
@@ -25,6 +25,7 @@ export const useErrorInfo = (
 ) => {
   const currentUser = useSelector(getUser);
   const isAdmin = useSelector(getUserIsAdmin);
+  const dispatch = useDispatch();
   const location = window.location.href;
 
   return useAsync(async () => {
@@ -43,7 +44,12 @@ export const useErrorInfo = (
 
     const isAdHoc = entity === "question" && window.location.href.includes("#");
 
-    const entityInfoRequest = getEntityDetails({ entity, id, isAdHoc });
+    const entityInfoRequest = getEntityDetails({
+      entity,
+      id,
+      isAdHoc,
+      dispatch,
+    });
     const bugReportDetailsRequest = isAdmin
       ? UtilApi.bug_report_details().catch(nullOnCatch)
       : Promise.resolve(null);
@@ -78,6 +84,7 @@ export const useErrorInfo = (
       entityInfo.originalCard = await getEntityDetails({
         entity,
         id: entityInfo.original_card_id,
+        dispatch,
       });
     }
 
