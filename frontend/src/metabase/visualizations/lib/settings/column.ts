@@ -75,6 +75,7 @@ export interface ColumnSettingsOptions {
 
 export function columnSettings({
   getColumns = DEFAULT_GET_COLUMNS,
+  getHidden,
   ...def
 }: ColumnSettingsOptions = {}) {
   return nestedSettings<"column_settings", DatasetColumn>("column_settings", {
@@ -87,6 +88,7 @@ export function columnSettings({
     component: ChartNestedSettingColumns,
     getInheritedSettingsForObject: getInheritedSettingsForColumn,
     useRawSeries: true,
+    getHidden,
     ...def,
   });
 }
