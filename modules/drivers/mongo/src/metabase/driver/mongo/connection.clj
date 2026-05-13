@@ -83,6 +83,8 @@
       ;;       manually verified that's not necessary.
       (when (seq user)
         (.credential builder
+                     ;; changes here require manual testing for docker reasons;
+                     ;; see metabase.driver.mongo-test/can-connect?-with-x509
                      (if (some-> additional-options
                                  u/lower-case-en
                                  (str/index-of "authmechanism=mongodb-x509"))
