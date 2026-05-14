@@ -1,7 +1,8 @@
 import { assocIn, dissocIn, getIn } from "icepick";
 import _ from "underscore";
 
-import { Dashboards } from "metabase/entities/dashboards";
+import { dashboardApi } from "metabase/api";
+import { entityCompatibleQuery } from "metabase/entities/utils";
 import { clickBehaviorIsValid } from "metabase/parameters/utils/click-behavior";
 import { createThunkAction } from "metabase/redux";
 import { UPDATE_DASHBOARD_AND_CARDS } from "metabase/redux/dashboard";
@@ -186,12 +187,14 @@ export const updateDashboardAndCards = createThunkAction(
         .filter((tab) => !tab.isRemoved)
         .map(({ id, name }) => ({ id, name }));
 
-      await dispatch(
-        Dashboards.actions.update({
+      await entityCompatibleQuery(
+        {
           ...dashboard,
           dashcards: dashcardsToUpdate,
           tabs: tabsToUpdate,
-        }),
+        },
+        dispatch,
+        dashboardApi.endpoints.updateDashboard,
       );
 
       const endTime = performance.now();
@@ -256,8 +259,10 @@ export const updateDashboard = createThunkAction(
       if (attributeNames.length > 0) {
         const attributes = _.pick(dashboard, attributeNames);
 
-        await dispatch(
-          Dashboards.actions.update({ id: dashboardId }, attributes),
+        await entityCompatibleQuery(
+          { id: dashboardId, ...attributes },
+          dispatch,
+          dashboardApi.endpoints.updateDashboard,
         );
       }
 
