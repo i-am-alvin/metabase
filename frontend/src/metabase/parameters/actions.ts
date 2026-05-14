@@ -3,6 +3,7 @@ import type {
   CardParameterValuesRequest,
   SearchCardParameterValuesRequest,
 } from "metabase/api/card";
+import { entityCompatibleQuery } from "metabase/entities/utils";
 import type { DispatchFn } from "metabase/redux";
 import type { GetState } from "metabase/redux/store";
 import { DashboardApi, ParameterApi } from "metabase/services";
@@ -141,16 +142,16 @@ const loadCardParameterValues = async (
   dispatch: DispatchFn,
 ) => {
   const isSearch = "query" in request && request.query;
-  const { values, has_more_values } = await dispatch(
+  const { values, has_more_values } = await entityCompatibleQuery(
+    request,
+    dispatch,
     isSearch
-      ? cardApi.endpoints.searchCardParameterValues.initiate(
-          request as SearchCardParameterValuesRequest,
-        )
-      : cardApi.endpoints.getCardParameterValues.initiate(request),
-  ).unwrap();
+      ? cardApi.endpoints.searchCardParameterValues
+      : cardApi.endpoints.getCardParameterValues,
+  );
 
   return {
-    values: values,
+    values,
     has_more_values: isSearch ? true : has_more_values,
   };
 };
