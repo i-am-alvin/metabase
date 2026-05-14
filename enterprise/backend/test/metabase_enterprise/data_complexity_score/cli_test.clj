@@ -3,14 +3,11 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.test :refer :all]
+   [metabase-enterprise.data-complexity-score.appdb-source :as appdb-source]
    [metabase-enterprise.data-complexity-score.cli :as cli]
    [metabase-enterprise.data-complexity-score.complexity :as complexity]
    [metabase-enterprise.data-complexity-score.complexity-embedders :as embedders]
-   [metabase-enterprise.data-complexity-score.metabot-scope :as metabot-scope]
-   [metabase-enterprise.data-complexity-score.models.data-complexity-score :as data-complexity-score]
    [metabase-enterprise.data-complexity-score.representation :as representation]
-   [metabase-enterprise.data-complexity-score.synonym-source :as synonym-source]
-   [metabase-enterprise.data-complexity-score.task.complexity-score :as task.complexity-score]
    [metabase.app-db.core :as mdb]
    [metabase.test :as mt]
    [metabase.util :as u]))
@@ -300,68 +297,64 @@
       (is (re-find #"--source appdb does not accept" (ex-message ex))))))
 
 (deftest ^:sequential run-cli-representation-mode-default-does-not-write-test
-  (testing "representation mode with no --write-to-appdb flag never calls record-score! or bootstrap"
-    (let [persisted?     (atom false)
-          bootstrapped?  (atom false)]
-      (mt/with-dynamic-fn-redefs [data-complexity-score/record-score! (fn [& _] (reset! persisted? true))
-                                  mdb/setup-db-without-migrations!    (fn [] (reset! bootstrapped? true))]
+  (testing "representation mode with no --write-to-appdb flag never writes or verifies the appdb"
+    (let [persisted? (atom false)
+          verified?  (atom false)]
+      (mt/with-dynamic-fn-redefs [appdb-source/record-score!             (fn [& _] (reset! persisted? true))
+                                  mdb/verify-application-db-connection!  (fn [] (reset! verified? true))]
         (#'cli/run-cli {:representation-dir representation-fixture-dir})
-        (is (false? @persisted?)   "representation+no-write must not persist anything")
-        (is (false? @bootstrapped?) "representation+no-write must not boot the appdb at all")))))
+        (is (false? @persisted?) "representation+no-write must not persist anything")
+        (is (false? @verified?)  "representation+no-write must not even open a connection to the appdb")))))
 
 (deftest ^:sequential run-cli-representation-mode-with-write-stamps-representation-source-test
-  (testing "representation + --write-to-appdb true persists a row stamped 'representation:<digest>' and does not advance the cron fingerprint"
-    (let [calls          (atom [])
-          advance-calls  (atom 0)]
-      (mt/with-dynamic-fn-redefs [mdb/setup-db-without-migrations!                (fn [])
-                                  task.complexity-score/current-fingerprint       (constantly "test-fp")
-                                  task.complexity-score/maybe-advance-last-fingerprint! (fn [& _]
-                                                                                          (swap! advance-calls inc))
-                                  data-complexity-score/record-score!             (fn [fp source _result]
-                                                                                    (swap! calls conj [fp source]))]
+  (testing (str "representation + --write-to-appdb true persists exactly one row via the JDBC writer, "
+                "stamped 'representation:<digest>', with a fingerprint derived from the result :meta "
+                "(no settings-cache read).")
+    (let [calls (atom [])]
+      (mt/with-dynamic-fn-redefs [mdb/verify-application-db-connection! (fn [])
+                                  appdb-source/record-score!            (fn [fp source _result]
+                                                                          (swap! calls conj [fp source]))]
         (#'cli/run-cli {:representation-dir representation-fixture-dir
                         :write-to-appdb     true})
         (is (= 1 (count @calls)) "exactly one row written")
         (let [[fp source] (first @calls)]
-          (is (= "test-fp" fp))
           (is (re-find #"^representation:[0-9a-f]{64}$" source)
-              "source must be 'representation:<sha-256 hex>'"))
-        (is (zero? @advance-calls)
-            "representation-derived rows must never advance the cron's last-fingerprint setting")))))
+              "source must be 'representation:<sha-256 hex>'")
+          (is (string? fp))
+          (is (re-find #":formula-version 1" fp)
+              "fingerprint must reflect the scored formula version")
+          (is (re-find #":weights \{" fp)
+              "fingerprint must include weights so a tuning change re-scores"))))))
 
 (deftest ^:sequential run-cli-appdb-mode-defaults-to-writing-test
-  (testing "appdb mode with no --write-to-appdb flag defaults to writing (true)"
+  (testing "appdb mode with no --write-to-appdb flag defaults to writing exactly one row stamped 'appdb-cli'"
     (let [calls         (atom [])
-          advance-calls (atom [])]
-      (mt/with-dynamic-fn-redefs [mdb/setup-db-without-migrations!                (fn [])
-                                  complexity/complexity-scores                    (fn [& _] {:meta {}})
-                                  synonym-source/complexity-scores-opts           (constantly {})
-                                  metabot-scope/internal-metabot-scope            (constantly {})
-                                  task.complexity-score/current-fingerprint       (constantly "appdb-fp")
-                                  task.complexity-score/maybe-advance-last-fingerprint! (fn [fp _result]
-                                                                                          (swap! advance-calls conj fp))
-                                  data-complexity-score/record-score!             (fn [fp source _result]
-                                                                                    (swap! calls conj [fp source]))]
+          verify-calls  (atom 0)]
+      (mt/with-dynamic-fn-redefs [mdb/verify-application-db-connection!  (fn [] (swap! verify-calls inc))
+                                  appdb-source/load-from-jdbc            (constantly {:library-entities  []
+                                                                                      :universe-entities []})
+                                  appdb-source/record-score!             (fn [fp source _result]
+                                                                           (swap! calls conj [fp source]))]
         (#'cli/run-cli {:source "appdb"})
-        (is (= [["appdb-fp" "appdb"]] @calls)
-            "appdb-mode default must write one row stamped source=\"appdb\"")
-        (is (= ["appdb-fp"] @advance-calls)
-            "appdb-mode write path must call maybe-advance-last-fingerprint! the same way the cron does")))))
+        (is (= 1 @verify-calls)
+            "appdb mode must verify the connection (read-only) exactly once")
+        (is (= 1 (count @calls)) "appdb-mode default must write exactly one row")
+        (let [[fp source] (first @calls)]
+          (is (= "appdb-cli" source)
+              "appdb-cli must distinguish CLI snapshots from the cron's 'appdb' rows")
+          (is (re-find #":synonym-source :disabled" fp)
+              "fingerprint must mark synonym scoring as deliberately disabled in CLI mode"))))))
 
 (deftest ^:sequential run-cli-appdb-mode-respects-explicit-no-write-test
-  (testing "appdb + --write-to-appdb false scores but never persists or advances the fingerprint"
-    (let [persisted?    (atom false)
-          advance-calls (atom 0)]
-      (mt/with-dynamic-fn-redefs [mdb/setup-db-without-migrations!                (fn [])
-                                  complexity/complexity-scores                    (fn [& _] {:meta {}})
-                                  synonym-source/complexity-scores-opts           (constantly {})
-                                  metabot-scope/internal-metabot-scope            (constantly {})
-                                  data-complexity-score/record-score!             (fn [& _] (reset! persisted? true))
-                                  task.complexity-score/maybe-advance-last-fingerprint! (fn [& _]
-                                                                                          (swap! advance-calls inc))]
+  (testing "appdb + --write-to-appdb false scores via JDBC but never inserts a row"
+    (let [persisted? (atom false)]
+      (mt/with-dynamic-fn-redefs [mdb/verify-application-db-connection! (fn [])
+                                  appdb-source/load-from-jdbc           (constantly {:library-entities  []
+                                                                                     :universe-entities []})
+                                  appdb-source/record-score!            (fn [& _] (reset! persisted? true))]
         (#'cli/run-cli {:source "appdb" :write-to-appdb false})
-        (is (false? @persisted?))
-        (is (zero? @advance-calls))))))
+        (is (false? @persisted?)
+            "explicit --write-to-appdb false must never insert a row, even though scoring still runs")))))
 
 (deftest ^:parallel dir-digest-is-stable-and-content-sensitive-test
   (testing "dir-digest produces the same value for the same content"
