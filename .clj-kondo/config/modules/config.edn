@@ -2483,6 +2483,7 @@
            metabase.warehouse-index-manager.init
            metabase.warehouse-index-manager.models.index-request}
    :uses #{driver
+           events
            models
            util}
    :model-exports #{:model/IndexRequest}
