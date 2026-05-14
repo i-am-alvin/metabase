@@ -21639,6 +21639,143 @@
         "tags" : [ "/api/email" ]
       }
     },
+    "/api/embed-mcp/drills" : {
+      "post" : {
+        "operationId" : "post-api-embed-mcp-drills",
+        "summary" : "POST /api/embed-mcp/drills",
+        "description" : "Stash a base64-encoded MBQL query for the iframe's pending drill-through and\n   return a handle UUID the iframe will thread into the agent message so the\n   `render_drill_through` tool can fetch it.",
+        "parameters" : [ ],
+        "responses" : {
+          "2XX" : {
+            "description" : "Successful response"
+          },
+          "4XX" : {
+            "description" : "Client error response"
+          },
+          "5XX" : {
+            "description" : "Server error response"
+          }
+        },
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object",
+                "properties" : {
+                  "encodedQuery" : {
+                    "type" : "string",
+                    "minLength" : 1
+                  }
+                },
+                "required" : [ "encodedQuery" ]
+              }
+            }
+          }
+        },
+        "tags" : [ "/api/embed-mcp" ]
+      }
+    },
+    "/api/embed-mcp/feedback" : {
+      "post" : {
+        "operationId" : "post-api-embed-mcp-feedback",
+        "summary" : "POST /api/embed-mcp/feedback",
+        "description" : "Proxy MCP Apps visualization feedback to Harbormaster.",
+        "parameters" : [ ],
+        "responses" : {
+          "2XX" : {
+            "description" : "Successful response",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object",
+                  "properties" : {
+                    "body" : {
+                      "type" : "null"
+                    },
+                    "status" : {
+                      "const" : 204
+                    }
+                  },
+                  "required" : [ "status", "body" ]
+                }
+              }
+            }
+          },
+          "4XX" : {
+            "description" : "Client error response"
+          },
+          "5XX" : {
+            "description" : "Server error response"
+          }
+        },
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object",
+                "properties" : {
+                  "conversation_data" : {
+                    "type" : "object",
+                    "properties" : {
+                      "prompt" : {
+                        "oneOf" : [ {
+                          "type" : "string",
+                          "maxLength" : 10000
+                        }, {
+                          "type" : "null"
+                        } ]
+                      },
+                      "query" : {
+                        "oneOf" : [ {
+                          "type" : "string",
+                          "maxLength" : 10000
+                        }, {
+                          "type" : "null"
+                        } ]
+                      },
+                      "source" : {
+                        "const" : "mcp"
+                      }
+                    },
+                    "required" : [ "source" ]
+                  },
+                  "feedback" : {
+                    "type" : "object",
+                    "properties" : {
+                      "freeform_feedback" : {
+                        "oneOf" : [ {
+                          "type" : "string",
+                          "maxLength" : 10000
+                        }, {
+                          "type" : "null"
+                        } ]
+                      },
+                      "issue_type" : {
+                        "oneOf" : [ {
+                          "type" : "string"
+                        }, {
+                          "type" : "null"
+                        } ]
+                      },
+                      "message_id" : {
+                        "type" : "string",
+                        "minLength" : 1
+                      },
+                      "positive" : {
+                        "type" : "boolean"
+                      }
+                    },
+                    "required" : [ "message_id", "positive" ]
+                  }
+                },
+                "required" : [ "feedback", "conversation_data" ]
+              }
+            }
+          }
+        },
+        "tags" : [ "/api/embed-mcp" ]
+      }
+    },
     "/api/embed-theme" : {
       "get" : {
         "operationId" : "get-api-embed-theme",
