@@ -485,8 +485,14 @@
                               to omit (the search-index path passes nil because its preprocessing
                               isn't a single named variant).
     `:metabot-scope`        — `{:verified-only? <bool> :collection-id <nil|Long>}` describing how
-                              the internal Metabot filters Cards."
-  [& {:keys [embedder embedding-model-meta text-variant metabot-scope]}]
+                              the internal Metabot filters Cards.
+    `:emit-snowplow?`       — when true (default), publishes one Snowplow event per leaf score /
+                              group total / grand total and stamps `::snowplow-published?` on the
+                              result metadata. The CLI passes false to score-without-publishing
+                              (it runs out-of-band relative to cron telemetry); the result's
+                              `::snowplow-published?` metadata is then false."
+  [& {:keys [embedder embedding-model-meta text-variant metabot-scope emit-snowplow?]
+      :or   {emit-snowplow? true}}]
   ;;; NOTE: we fully materialize vectors of the relevant entities.
   ;;; For very large instances that means holding large lists in memory, but each catalog is consumed
   ;;; by many sub-score functions that each walk the collection, so making this reducible would
@@ -511,18 +517,22 @@
                                         embedding-model-meta (assoc :embedding-model embedding-model-meta)
                                         text-variant         (assoc :text-variant    text-variant))}]
         (log-scores! result)
-        (let [published? (time-phase! "publish" "all"
-                                      (fn []
-                                        (try
-                                          (emit-snowplow! result)
-                                          (catch Throwable t
-                                            (log/warn t "Failed to publish complexity score to Snowplow")
-                                            false))))]
+        (let [published? (when emit-snowplow?
+                           (time-phase! "publish" "all"
+                                        (fn []
+                                          (try
+                                            (emit-snowplow! result)
+                                            (catch Throwable t
+                                              (log/warn t "Failed to publish complexity score to Snowplow")
+                                              false)))))]
           ;; `emit-snowplow!` returns true only when every event reached the tracker (false when
           ;; Snowplow is disabled or any emission failed) — scheduler/boot callers gate
           ;; `data-complexity-scoring-last-fingerprint` on this so a disabled collector or any
-          ;; partial failure doesn't silently mark the fingerprint as published.
-          (with-meta result {::snowplow-published? published?})))
+          ;; partial failure doesn't silently mark the fingerprint as published. The CLI passes
+          ;; `:emit-snowplow? false` and gets `::snowplow-published? false` here for the same
+          ;; reason — its callers (`cli/run-appdb-mode!`) deliberately don't advance the
+          ;; fingerprint, so a missing publish must look like a non-publish, not a successful one.
+          (with-meta result {::snowplow-published? (boolean published?)})))
       (finally
         (analytics.interface/observe! :metabase-data-complexity/scoring-duration-ms
                                       (u/since-ms total-timer))))))

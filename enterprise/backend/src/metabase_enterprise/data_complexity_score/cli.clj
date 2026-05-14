@@ -6,19 +6,20 @@
     `--source representation` (default) — scores an on-disk serdes export. No appdb required
        unless `--write-to-appdb true` is also requested.
 
-    `--source appdb` — scores entities read directly from the application DB via raw JDBC,
-       deliberately bypassing the Toucan model layer that the cron and API use. Intended to
-       stay safe even when a newer Metabase binary is pointed at an older appdb (e.g. a v73 CLI
-       sampling a v54 appdb to compute a comparative score) — see
-       [[metabase-enterprise.data-complexity-score.appdb-source]] for the isolation contract and
-       the scope reductions it implies (no synonym-axis, no `:metabot` catalog, no Snowplow, no
-       fingerprint advance).
+    `--source appdb` — scores live entities the same way the cron job and API endpoint do —
+       same fingerprint, same synonym axis, same `:library`/`:universe`/`:metabot` catalogs.
+       The only divergence from the cron is on the *write* side: instead of going through
+       `data-complexity-score/record-score!` (Toucan insert + transforms), the CLI persists via
+       [[metabase-enterprise.data-complexity-score.appdb-source/record-score!]], a single raw
+       `INSERT INTO data_complexity_score`. The CLI also skips Snowplow publication and never
+       advances `data-complexity-scoring-last-fingerprint`.
+
+       This isolates the CLI from a class of `:before-insert` / cascade hazards that could
+       surprise an older appdb (e.g. a v73 binary against a v54 appdb): the only mutation this
+       CLI can make on the appdb is the one INSERT row.
 
   Persistence is controlled independently by `--write-to-appdb`. The default tracks the source:
-  true in appdb mode, false in representation mode. Both can be overridden explicitly. Whether
-  or not we persist, no read or write here goes through Toucan — the only DB mutation this CLI
-  is ever capable of is the single `INSERT INTO data_complexity_score` performed by
-  [[metabase-enterprise.data-complexity-score.appdb-source/record-score!]].
+  true in appdb mode, false in representation mode. Both can be overridden explicitly.
 
   Two invocation styles:
 
@@ -40,7 +41,10 @@
    [clojure.tools.cli :as cli]
    [metabase-enterprise.data-complexity-score.appdb-source :as appdb-source]
    [metabase-enterprise.data-complexity-score.complexity :as complexity]
+   [metabase-enterprise.data-complexity-score.metabot-scope :as metabot-scope]
    [metabase-enterprise.data-complexity-score.representation :as representation]
+   [metabase-enterprise.data-complexity-score.synonym-source :as synonym-source]
+   [metabase-enterprise.data-complexity-score.task.complexity-score :as task.complexity-score]
    [metabase.app-db.core :as mdb]))
 
 (set! *warn-on-reflection* true)
@@ -113,22 +117,6 @@
       (print (pretty result))
       (flush))))
 
-(defn- cli-fingerprint
-  "Build a fingerprint reflecting what we actually scored, derived from the score result's `:meta`.
-  Mirrors the shape of [[metabase-enterprise.data-complexity-score.task.complexity-score/current-fingerprint]]
-  but reads from the in-memory result rather than from the settings cache — so the CLI never
-  warms the settings cache (which can write back default values) on either source path. Stable
-  for identical inputs; differs from the cron's fingerprint by design so cron rows and CLI rows
-  remain distinguishable even when stored under the same `source` value."
-  [{:keys [formula-version synonym-threshold weights embedding-model text-variant]}]
-  (pr-str (into (sorted-map)
-                (cond-> {:formula-version   formula-version
-                         :synonym-threshold synonym-threshold
-                         :weights           weights}
-                  embedding-model       (assoc :embedding-model embedding-model)
-                  text-variant          (assoc :text-variant    text-variant)
-                  (nil? embedding-model) (assoc :synonym-source :disabled)))))
-
 (defn- resolve-write?
   "Apply the source-driven default for `--write-to-appdb` when it wasn't passed explicitly."
   [{:keys [write-to-appdb]} appdb-source?]
@@ -151,36 +139,30 @@
       (validate-dir! representation-dir))))
 
 (defn- run-appdb-mode!
-  "Score the live appdb via raw JDBC and, when `write?`, persist a single
-  `data_complexity_score` row (also raw JDBC). No Toucan, no settings cache, no Snowplow, no
-  fingerprint advance — see [[metabase-enterprise.data-complexity-score.appdb-source]] for the
-  full isolation contract.
-
-  `source` on persisted rows is `\"appdb-cli\"` so analytics queries (and the API's
-  `latest-score` lookup, which defaults to `\"appdb\"`) can distinguish CLI snapshots from
-  cron-produced rows without inspecting `:meta`."
+  "Score the live appdb the same way the cron does — same fingerprint, same synonym axis, same
+  three catalogs. The only divergence is the write step: optional, raw-JDBC INSERT, no
+  fingerprint advance, no Snowplow."
   [write?]
-  (mdb/verify-application-db-connection!)
-  (let [{:keys [library-entities universe-entities]} (appdb-source/load-from-jdbc)
-        result                                       (complexity/score-from-entities library-entities
-                                                                                     universe-entities
-                                                                                     nil
-                                                                                     {})]
+  (mdb/setup-db-without-migrations!)
+  (let [result (complexity/complexity-scores
+                (assoc (synonym-source/complexity-scores-opts)
+                       :metabot-scope   (metabot-scope/internal-metabot-scope)
+                       :emit-snowplow?  false))]
     (when write?
-      (appdb-source/record-score! (cli-fingerprint (:meta result)) "appdb-cli" result))
+      (appdb-source/record-score! (task.complexity-score/current-fingerprint) "appdb" result))
     result))
 
 (defn- run-representation-mode!
-  "Score an on-disk serdes export and, when `write?`, persist a single `data_complexity_score`
-  row via raw JDBC stamped `\"representation:<digest>\"`."
+  "Score an on-disk serdes export and, when `write?`, persist via the same raw-JDBC writer the
+  appdb path uses, stamped `\"representation:<digest>\"`."
   [{:keys [representation-dir embeddings]} write?]
   (when write?
-    (mdb/verify-application-db-connection!))
+    (mdb/setup-db-without-migrations!))
   (let [{:keys [library universe embedder digest]} (representation/load-dir representation-dir
                                                                             :embeddings-path embeddings)
         result                                     (complexity/score-from-entities library universe embedder {})]
     (when write?
-      (appdb-source/record-score! (cli-fingerprint (:meta result))
+      (appdb-source/record-score! (task.complexity-score/current-fingerprint)
                                   (str "representation:" digest)
                                   result))
     result))
